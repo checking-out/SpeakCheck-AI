@@ -1,0 +1,14 @@
+[
+  {
+    "question": "다음 문장의 핵심 내용은 무엇인가요? 'Then let me introduce our team members...'",
+    "answer": "Then let me introduce our team members",
+    "hint": "문장을 다시 읽어보고 주요 키워드를 찾아보세요.",
+    "type": "주관식"
+  },
+  {
+    "question": "다음 문장의 핵심 내용은 무엇인가요? 'Junho did the back-end and AI, Eunseo did the desi...'",
+    "answer": "Junho did the back-end and AI, Eunseo did the design, and I was in charge of content",
+    "hint": "문장을 다시 읽어보고 주요 키워드를 찾아보세요.",
+    "type": "주관식"
+  }
+]
