@@ -44,6 +44,7 @@ class QuestionGenerator:
             
             # 응답 파싱
             questions_text = response.text
+            print(f"🔍 Gemini 응답 (디버그):\n{questions_text}\n")
             return self._parse_questions(questions_text)
             
         except Exception as e:
@@ -85,43 +86,47 @@ class QuestionGenerator:
     def _parse_questions(self, questions_text: str) -> List[Dict]:
         """생성된 질문 텍스트를 파싱하여 구조화된 데이터로 변환"""
         questions = []
-        lines = questions_text.strip().split('\n')
         
-        current_question = {}
-        question_num = 1
+        # 정규표현식을 사용한 더 강력한 파싱
+        import re
         
-        for line in lines:
-            line = line.strip()
-            if not line:
+        # 질문 블록을 분리 (숫자. 질문: 패턴으로 시작)
+        question_blocks = re.split(r'\n(?=\d+\.\s*질문:)', questions_text.strip())
+        
+        for block in question_blocks:
+            if not block.strip():
                 continue
                 
-            if line.startswith(f"{question_num}.") or line.startswith("질문:"):
-                if current_question:
-                    questions.append(current_question)
-                    question_num += 1
-                
-                current_question = {
-                    "question": "",
-                    "answer": "",
-                    "hint": "",
-                    "type": "주관식"
-                }
-                
-                if "질문:" in line:
-                    current_question["question"] = line.split("질문:", 1)[1].strip()
-                else:
-                    current_question["question"] = line.split(".", 1)[1].strip() if "." in line else line
+            question = {}
+            lines = block.strip().split('\n')
+            
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
                     
-            elif line.startswith("답변:"):
-                current_question["answer"] = line.split("답변:", 1)[1].strip()
-            elif line.startswith("힌트:"):
-                current_question["hint"] = line.split("힌트:", 1)[1].strip()
-            elif line.startswith("유형:"):
-                current_question["type"] = line.split("유형:", 1)[1].strip()
-        
-        # 마지막 질문 추가
-        if current_question and current_question["question"]:
-            questions.append(current_question)
+                if line.startswith(('1.', '2.', '3.', '4.', '5.', '6.', '7.', '8.', '9.')) and '질문:' in line:
+                    # 질문 텍스트 추출
+                    question["question"] = line.split('질문:', 1)[1].strip()
+                elif line.startswith('답변:'):
+                    question["answer"] = line.split('답변:', 1)[1].strip()
+                elif line.startswith('힌트:'):
+                    question["hint"] = line.split('힌트:', 1)[1].strip()
+                elif line.startswith('유형:'):
+                    question["type"] = line.split('유형:', 1)[1].strip()
+            
+            # 기본값 설정
+            if "question" not in question:
+                question["question"] = ""
+            if "answer" not in question:
+                question["answer"] = ""
+            if "hint" not in question:
+                question["hint"] = ""
+            if "type" not in question:
+                question["type"] = "주관식"
+            
+            if question["question"]:
+                questions.append(question)
         
         return questions
     
