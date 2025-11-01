@@ -271,8 +271,8 @@ def get_speech(speech_id: UUID, current_user_id: UUID = Depends(get_current_user
     return _serialize_speech(speech)
 
 
-@app.get("/speech/{speech_id}/questions", response_model=List[QuestionRecord], tags=["speech", "questions"])
-def list_speech_questions(speech_id: UUID, current_user_id: UUID = Depends(get_current_user_id)) -> List[QuestionRecord]:
+@app.get("/question/{speech_id}", response_model=List[QuestionRecord], tags=["question"])
+def get_questions_for_speech(speech_id: UUID, current_user_id: UUID = Depends(get_current_user_id)) -> List[QuestionRecord]:
     speech = database.get_speech(speech_id)
     if not speech:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Speech not found")
@@ -313,25 +313,25 @@ def list_speech_questions(speech_id: UUID, current_user_id: UUID = Depends(get_c
 
 
 @app.post(
-    "/speech/{speech_id}/questions/{question_id}/answer",
+    "/question/answer/{question_id}",
     response_model=QuestionAnswerResponse,
-    tags=["speech", "questions"],
+    tags=["question"],
 )
 def submit_question_answer(
-    speech_id: UUID,
     question_id: UUID,
     request: QuestionAnswerRequest,
     current_user_id: UUID = Depends(get_current_user_id),
 ) -> QuestionAnswerResponse:
+    question = database.get_question(question_id)
+    if not question:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found")
+
+    speech_id = UUID(str(question["speech_id"]))
     speech = database.get_speech(speech_id)
     if not speech:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Speech not found")
 
     _ensure_stage_ownership(UUID(str(speech["stage_id"])), current_user_id)
-
-    question = database.get_question(question_id)
-    if not question or UUID(str(question["speech_id"])) != speech_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found")
 
     feedback_text: Optional[str] = None
     feedback_score: Optional[int] = None
