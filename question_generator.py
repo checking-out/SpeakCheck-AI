@@ -67,20 +67,14 @@ class QuestionGenerator:
 텍스트:
 {text}
 
-각 질문에 대해 다음 형식으로 답변해주세요:
+각 질문에 대해 아래 형식을 정확히 지켜주세요.
+
 1. 질문: [질문 내용]
-   답변: [정답]
-   힌트: [힌트]
-   유형: [객관식/주관식/서술형]
+   모범답안: [가장 이상적인 답변 요약]
 
-2. 질문: [질문 내용]
-   답변: [정답]
-   힌트: [힌트]
-   유형: [객관식/주관식/서술형]
+2. 질문: ...
 
-... (총 {num_questions}개)
-
-질문은 텍스트의 핵심 내용을 다루되, 단순 암기가 아닌 이해와 사고를 요구하는 질문으로 만들어주세요.
+형식과 라벨(질문, 모범답안)을 정확히 지켜주세요. 불필요한 부가 설명은 하지 마세요.
 """
     
     def _parse_questions(self, questions_text: str) -> List[Dict]:
@@ -108,22 +102,16 @@ class QuestionGenerator:
                 if line.startswith(('1.', '2.', '3.', '4.', '5.', '6.', '7.', '8.', '9.')) and '질문:' in line:
                     # 질문 텍스트 추출
                     question["question"] = line.split('질문:', 1)[1].strip()
-                elif line.startswith('답변:'):
-                    question["answer"] = line.split('답변:', 1)[1].strip()
-                elif line.startswith('힌트:'):
-                    question["hint"] = line.split('힌트:', 1)[1].strip()
-                elif line.startswith('유형:'):
-                    question["type"] = line.split('유형:', 1)[1].strip()
+                elif line.startswith('모범답안:'):
+                    question["model_answer"] = line.split('모범답안:', 1)[1].strip()
             
             # 기본값 설정
             if "question" not in question:
                 question["question"] = ""
-            if "answer" not in question:
-                question["answer"] = ""
-            if "hint" not in question:
-                question["hint"] = ""
-            if "type" not in question:
-                question["type"] = "주관식"
+            if "model_answer" not in question:
+                question["model_answer"] = ""
+            if "model_answer" not in question:
+                question["model_answer"] = ""
             
             if question["question"]:
                 questions.append(question)
@@ -150,11 +138,9 @@ class QuestionGenerator:
             
             questions.append({
                 "question": question,
-                "answer": answer,
-                "hint": hint,
-                "type": "주관식"
+                "model_answer": answer,
             })
-        
+
         return questions
     
     def save_questions(self, questions: List[Dict], filename: str = "generated_questions.json"):
@@ -173,10 +159,9 @@ class QuestionGenerator:
         print("="*60)
         
         for i, q in enumerate(questions, 1):
-            print(f"\n🔸 질문 {i} ({q.get('type', '주관식')})")
-            print(f"   Q: {q['question']}")
-            print(f"   A: {q['answer']}")
-            print(f"   💡 힌트: {q['hint']}")
+            print(f"\n🔸 질문 {i}")
+            print(f"   Q: {q.get('question')}")
+            print(f"   모범답안: {q.get('model_answer')}")
             print("-" * 50)
 
 def main():

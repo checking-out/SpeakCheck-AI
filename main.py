@@ -1,192 +1,439 @@
-import os
 import subprocess
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+from uuid import UUID
+
+import boto3
 import whisper
+from botocore.exceptions import ClientError
+import yt_dlp
+import requests
 
-def extract_audio_from_video(video_path, output_dir="audio"):
-    os.makedirs(output_dir, exist_ok=True)
-    base_name = os.path.splitext(os.path.basename(video_path))[0]
-    output_path = os.path.join(output_dir, f"{base_name}.mp3")
+from config import Settings
+from database import Database
+from question_generator import QuestionGenerator
+from pdf_to_text import PDFTextExtractor
+from pdf_ocr import PDFOCR
 
-    if not os.path.isfile(output_path):
+_MODEL_CACHE: Dict[str, Any] = {}
+_PDF_TEXT_EXTRACTOR = PDFTextExtractor()
+_PDF_OCR = PDFOCR()
+
+
+def ensure_directory(path: Path) -> Path:
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def download_video_from_web(url: str, download_dir: Path, job_id: int) -> Path:
+    ensure_directory(download_dir)
+    output_template = download_dir / f"{job_id}_%(title)s.%(ext)s"
+    ydl_opts = {
+        "outtmpl": str(output_template),
+        "format": "bestaudio/best",
+        "noplaylist": True,
+        "quiet": True,
+        "no_warnings": True,
+        "retries": 3,
+    }
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            downloaded_path = Path(ydl.prepare_filename(info))
+            print(f"⬇️  웹에서 비디오 다운로드 완료: {downloaded_path}")
+            return downloaded_path
+    except Exception as exc:  # pylint: disable=broad-except
+        print(f"⚠️  yt-dlp 다운로드 실패, HTTP 다운로드 시도: {exc}")
+
+    fallback_path = download_dir / f"{job_id}_video"
+    try:
+        return download_file_via_http(url, fallback_path, suffix=".mp4")
+    except Exception as http_exc:  # pylint: disable=broad-except
+        raise RuntimeError(f"웹 비디오 다운로드 실패: {http_exc}") from http_exc
+
+
+def download_file_via_http(url: str, base_path: Path, suffix: Optional[str] = None) -> Path:
+    target_path = base_path
+    if suffix:
+        target_path = base_path.with_suffix(suffix)
+    else:
+        target_path = Path(base_path)
+    response = requests.get(url, stream=True, timeout=60)
+    response.raise_for_status()
+
+    with open(target_path, "wb") as file_handle:
+        for chunk in response.iter_content(chunk_size=8192):
+            if chunk:
+                file_handle.write(chunk)
+
+    print(f"⬇️  HTTP 다운로드 완료: {target_path}")
+    return target_path
+
+
+def get_whisper_model(model_size: str) -> Any:
+    if model_size not in _MODEL_CACHE:
+        print(f"🔄 Whisper 모델 로딩 중: {model_size}")
+        _MODEL_CACHE[model_size] = whisper.load_model(model_size)
+    return _MODEL_CACHE[model_size]
+
+
+def extract_audio_from_video(video_path: Path, output_dir: Path) -> Path:
+    ensure_directory(output_dir)
+    base_name = video_path.stem
+    output_path = output_dir / f"{base_name}.mp3"
+
+    if not output_path.exists():
         command = [
-            "ffmpeg", "-i", video_path,
+            "ffmpeg",
+            "-i",
+            str(video_path),
             "-vn",
-            "-acodec", "mp3",
-            "-ab", "192k",
-            "-ar", "44100",
-            output_path
+            "-acodec",
+            "mp3",
+            "-ab",
+            "192k",
+            "-ar",
+            "44100",
+            str(output_path),
         ]
         subprocess.run(command, check=True)
+
     return output_path
 
-def transcribe_audio(audiofile, model_size="medium", language=None): # 맥 죽을거 같으면 medium대신 small ㄱㄱ large는 내꺼도 죽는다
-    model = whisper.load_model(model_size)
-    
-    # 발음 이슈를 고려한 옵션들
-    transcribe_options = {
-        "language": language,
-        "fp16": False,  # CPU에서는 FP32 사용
-        "verbose": True,  # 상세한 로그 출력
-        "word_timestamps": True,  # 단어별 타임스탬프
-        "condition_on_previous_text": True,  # 이전 텍스트를 고려
-        "compression_ratio_threshold": 2.4,  # 압축률 임계값 (너무 반복적인 텍스트 감지)
-        "logprob_threshold": -1.0,  # 로그 확률 임계값 (낮은 확률의 단어 감지)
-        "no_speech_threshold": 0.6,  # 무음 감지 임계값
-    }
-    
-    result = model.transcribe(audiofile, **transcribe_options)
-    return result
 
-def analyze_transcription_quality(result):
-    """변환 품질을 분석하고 개선 제안을 제공"""
-    text = result["text"]
+def transcribe_audio(audiofile: Path, model_size: str = "medium", language: Optional[str] = None) -> Dict[str, Any]:
+    model = get_whisper_model(model_size)
+
+    transcribe_options: Dict[str, Any] = {
+        "fp16": False,
+        "verbose": True,
+        "word_timestamps": True,
+        "condition_on_previous_text": True,
+        "compression_ratio_threshold": 2.4,
+        "logprob_threshold": -1.0,
+        "no_speech_threshold": 0.6,
+    }
+
+    if language:
+        transcribe_options["language"] = language
+
+    return model.transcribe(str(audiofile), **transcribe_options)
+
+
+def analyze_transcription_quality(result: Dict[str, Any], verbose: bool = True) -> Dict[str, Any]:
+    text = result.get("text", "")
     segments = result.get("segments", [])
-    
-    print("\n" + "="*50)
-    print("📊 변환 품질 분석")
-    print("="*50)
-    
-    # 기본 통계
+
     word_count = len(text.split())
     char_count = len(text)
     segment_count = len(segments)
-    
-    print(f"📝 총 단어 수: {word_count}")
-    print(f"📝 총 문자 수: {char_count}")
-    print(f"📝 구간 수: {segment_count}")
-    
-    # 신뢰도 분석
-    if segments:
-        avg_prob = sum(seg.get("avg_logprob", 0) for seg in segments) / len(segments)
-        print(f"📊 평균 신뢰도: {avg_prob:.2f}")
-        
-        # 낮은 신뢰도 구간 찾기
-        low_confidence_segments = [seg for seg in segments if seg.get("avg_logprob", 0) < -1.0]
-        if low_confidence_segments:
-            print(f"⚠️  낮은 신뢰도 구간: {len(low_confidence_segments)}개")
-            print("   시간대별 낮은 신뢰도 구간:")
-            for seg in low_confidence_segments[:3]:  # 처음 3개만 표시
-                start_time = seg.get("start", 0)
-                end_time = seg.get("end", 0)
-                text_preview = seg.get("text", "")[:50] + "..." if len(seg.get("text", "")) > 50 else seg.get("text", "")
-                print(f"   {start_time:.1f}s-{end_time:.1f}s: {text_preview}")
-    
-    # 개선 제안
-    print("\n💡 개선 제안:")
-    if avg_prob < -0.5:
-        print("   • 발음이 불분명할 수 있습니다. 더 큰 모델을 사용해보세요 (large)")
-        print("   • 배경 소음이 있을 수 있습니다. 조용한 환경에서 녹음해보세요")
-    if word_count < 10:
-        print("   • 텍스트가 너무 짧습니다. 더 긴 오디오를 사용해보세요")
-    if segment_count > 50:
-        print("   • 구간이 너무 많습니다. 연속적인 발화를 시도해보세요")
-    
-    return {
+
+    avg_prob = 0.0
+    low_confidence_segments = []
+    if segment_count:
+        avg_prob = sum(seg.get("avg_logprob", 0.0) for seg in segments) / segment_count
+        low_confidence_segments = [
+            {
+                "start": seg.get("start", 0.0),
+                "end": seg.get("end", 0.0),
+                "text": seg.get("text", "").strip(),
+                "avg_logprob": seg.get("avg_logprob"),
+            }
+            for seg in segments
+            if seg.get("avg_logprob", 0.0) < -1.0
+        ]
+
+    quality_report = {
         "word_count": word_count,
-        "avg_confidence": avg_prob if segments else 0,
-        "low_confidence_segments": len(low_confidence_segments) if segments else 0
+        "char_count": char_count,
+        "segment_count": segment_count,
+        "avg_confidence": avg_prob,
+        "low_confidence_segments_count": len(low_confidence_segments),
     }
 
-# 사용자로부터 비디오 파일 경로 입력받기
-video_file = input("비디오 파일 경로를 입력하세요: ")
+    if verbose:
+        print("\n" + "=" * 50)
+        print("📊 변환 품질 분석")
+        print("=" * 50)
+        print(f"📝 총 단어 수: {word_count}")
+        print(f"📝 총 문자 수: {char_count}")
+        print(f"📝 구간 수: {segment_count}")
+        print(f"📊 평균 신뢰도: {avg_prob:.2f}")
 
-if not os.path.isfile(video_file):
-    print(f"파일을 찾을 수 없습니다: {video_file}")
-    exit(1)
+        if low_confidence_segments:
+            print(f"⚠️  낮은 신뢰도 구간: {len(low_confidence_segments)}개")
+            for seg in low_confidence_segments[:3]:
+                print(
+                    f"   {seg['start']:.1f}s-{seg['end']:.1f}s: "
+                    f"{seg['text'][:50]}{'...' if len(seg['text']) > 50 else ''}"
+                )
 
-# 언어 선택
-print("\n언어를 선택하세요:")
-print("1. 자동 감지 (권장)")
-print("2. 한국어")
-print("3. 영어")
-print("4. 일본어")
-print("5. 중국어")
+        print("\n💡 개선 제안:")
+        if avg_prob < -0.5:
+            print("   • 발음이 불분명할 수 있습니다. 더 큰 모델을 사용해보세요 (large)")
+            print("   • 배경 소음이 있을 수 있습니다. 조용한 환경에서 녹음해보세요")
+        if word_count < 10:
+            print("   • 텍스트가 너무 짧습니다. 더 긴 오디오를 사용해보세요")
+        if segment_count > 50:
+            print("   • 구간이 너무 많습니다. 연속적인 발화를 시도해보세요")
 
-lang_choice = input("선택 (1-5): ").strip()
+    return quality_report
 
-language_map = {
-    "1": None,      # 자동 감지
-    "2": "ko",      # 한국어
-    "3": "en",      # 영어
-    "4": "ja",      # 일본어
-    "5": "zh"       # 중국어
-}
 
-selected_language = language_map.get(lang_choice, None)
-if selected_language is None and lang_choice != "1":
-    print("잘못된 선택입니다. 자동 감지를 사용합니다.")
-    selected_language = None
+def resolve_video_source(
+    job: Dict[str, Any],
+    settings: Settings,
+    s3_client: Any,
+) -> Path:
+    video_source = job["video_source"]
+    potential_path = Path(video_source).expanduser()
+    if potential_path.exists():
+        return potential_path
 
-audio_path = extract_audio_from_video(video_file)
-print("오디오 파일 경로:", audio_path)
+    ensure_directory(Path(settings.downloads_dir))
 
-if os.path.isfile(audio_path):
-    print(f"\n음성을 텍스트로 변환 중... (언어: {'자동 감지' if selected_language is None else selected_language})")
-    result = transcribe_audio(audio_path, language=selected_language)
-    
-    print("\n" + "="*50)
-    print("📝 변환된 텍스트")
-    print("="*50)
-    print(result["text"])
-    
-    # 품질 분석
-    quality_info = analyze_transcription_quality(result)
-    
-    # 질문 생성 옵션
-    generate_questions = input("\n🤖 이 텍스트로 AI 질문을 생성하시겠습니까? (y/n): ").lower().strip()
-    if generate_questions == 'y':
-        print("\n" + "="*50)
-        print("🤖 AI 질문 생성기 실행")
-        print("="*50)
-        
-        # question_generator 모듈 import 및 실행
+    if video_source.startswith(("http://", "https://")):
+        return download_video_from_web(video_source, Path(settings.downloads_dir), job["id"])
+
+    if video_source.startswith("s3://"):
+        _, _, remainder = video_source.partition("s3://")
+        bucket, _, key = remainder.partition("/")
+        if not bucket or not key:
+            raise ValueError(f"잘못된 S3 경로입니다: {video_source}")
+    else:
+        bucket = settings.aws_bucket
+        key = video_source.lstrip("/")
+
+    local_name = f"{job['id']}_{Path(key).name}"
+    local_path = Path(settings.downloads_dir) / local_name
+
+    if not local_path.exists():
+        print(f"⬇️  S3에서 비디오 다운로드 중: s3://{bucket}/{key}")
         try:
-            from question_generator import QuestionGenerator
-            
-            # 질문 생성기 초기화
-            generator = QuestionGenerator()
-            
-            # 질문 수와 난이도 설정
+            s3_client.download_file(bucket, key, str(local_path))
+        except ClientError as exc:
+            raise RuntimeError(f"S3 다운로드 실패: {exc}") from exc
+
+    return local_path
+
+
+def resolve_document_source(
+    speech: Dict[str, Any],
+    settings: Settings,
+    s3_client: Any,
+) -> Optional[Path]:
+    document_url = speech.get("document_url")
+    if not document_url:
+        return None
+
+    potential_path = Path(str(document_url)).expanduser()
+    if potential_path.exists():
+        return potential_path
+
+    ensure_directory(Path(settings.downloads_dir))
+
+    if str(document_url).startswith(("http://", "https://")):
+        return download_document_from_web(str(document_url), Path(settings.downloads_dir), speech["id"])
+
+    if document_url.startswith("s3://"):
+        _, _, remainder = document_url.partition("s3://")
+        bucket, _, key = remainder.partition("/")
+        if not bucket or not key:
+            raise ValueError(f"잘못된 S3 경로입니다: {document_url}")
+    else:
+        bucket = settings.aws_bucket
+        key = document_url.lstrip("/")
+
+    local_name = f"{speech['id']}_{Path(key).name}"
+    local_path = Path(settings.downloads_dir) / local_name
+
+    if not local_path.exists():
+        print(f"⬇️  S3에서 문서 다운로드 중: s3://{bucket}/{key}")
+        try:
+            s3_client.download_file(bucket, key, str(local_path))
+        except ClientError as exc:
+            raise RuntimeError(f"S3 문서 다운로드 실패: {exc}") from exc
+
+    return local_path
+
+
+def download_document_from_web(url: str, download_dir: Path, speech_id: UUID) -> Optional[Path]:
+    ensure_directory(download_dir)
+    suffix = Path(url).suffix.lower()
+    if suffix not in {".pdf", ".ppt", ".pptx"}:
+        print(f"⚠️  지원하지 않는 문서 형식입니다: {url}")
+        return None
+
+    filename = f"{speech_id}_document{suffix}"
+    target_path = download_dir / filename
+    try:
+        return download_file_via_http(url, target_path)
+    except Exception as exc:  # pylint: disable=broad-except
+        print(f"⚠️  문서 다운로드 실패: {exc}")
+        return None
+
+
+def extract_document_text(document_path: Path) -> Dict[str, Any]:
+    primary = _PDF_TEXT_EXTRACTOR.extract_text(str(document_path))
+    if primary.get("success") and primary.get("full_text"):
+        return {
+            "method": primary.get("method", "pdfplumber"),
+            "full_text": primary.get("full_text", ""),
+            "details": primary,
+        }
+
+    try:
+        secondary = _PDF_OCR.extract_text_from_pdf(str(document_path))
+        return {
+            "method": "ocr",
+            "full_text": secondary.get("full_text", ""),
+            "details": secondary,
+        }
+    except Exception as exc:
+        return {
+            "method": "unavailable",
+            "full_text": "",
+            "details": {"error": str(exc)},
+        }
+
+
+def maybe_generate_questions(source_text: str, job: Dict[str, Any], db: Database) -> Optional[List[Dict[str, Any]]]:
+    if not job.get("generate_questions") or not source_text.strip():
+        return None
+
+    generator = QuestionGenerator()
+    raw_questions = generator.generate_questions(source_text)
+
+    sanitized_questions: List[Dict[str, Any]] = []
+    for entry in raw_questions:
+        question_text = entry.get("question", "").strip()
+        if not question_text:
+            continue
+        sanitized_questions.append(
+            {
+                "question": question_text,
+                "answer": None,
+                "model_answer": entry.get("model_answer"),
+                "improvement_tips": None,
+                "score": None,
+            }
+        )
+
+    speech_id = job.get("speech_id")
+    if speech_id:
+        db.store_questions(speech_id, sanitized_questions)
+
+    generator.display_questions(raw_questions)
+    return sanitized_questions or None
+
+
+def process_job(job: Dict[str, Any], settings: Settings, s3_client: Any, db: Database) -> None:
+    print(f"\n🚀 작업 시작: #{job['id']} ({job['video_source']})")
+    try:
+        speech_record: Optional[Dict[str, Any]] = None
+        speech_uuid: Optional[UUID] = None
+        speech_id_value = job.get("speech_id")
+        if speech_id_value:
             try:
-                num_questions = int(input("생성할 질문 수 (기본값: 5): ") or "5")
-                difficulty = input("난이도 (easy/medium/hard, 기본값: medium): ").strip() or "medium"
+                speech_uuid = UUID(str(speech_id_value))
+                speech_record = db.get_speech(speech_uuid)
             except ValueError:
-                num_questions = 5
-                difficulty = "medium"
-            
-            # 질문 생성
-            print(f"\n🔄 {num_questions}개의 {difficulty} 난이도 질문을 생성 중...")
-            questions = generator.generate_questions(result["text"], num_questions, difficulty)
-            
-            # 결과 출력
-            generator.display_questions(questions)
-            
-            # 저장 여부 확인
-            save = input("\n💾 질문을 파일로 저장하시겠습니까? (y/n): ").lower().strip()
-            if save == 'y':
-                filename = input("파일명 (기본값: generated_questions.json): ").strip() or "generated_questions.json"
-                generator.save_questions(questions, filename)
-                
-        except ImportError:
-            print("❌ question_generator.py 파일을 찾을 수 없습니다.")
-        except Exception as e:
-            print(f"❌ 질문 생성 중 오류 발생: {e}")
-    
-    # 추가 옵션 제안
-    if quality_info["avg_confidence"] < -0.5:
-        print("\n🔄 개선을 위한 추가 옵션:")
-        print("   • 더 큰 모델 사용 (large) - 더 정확하지만 느림")
-        print("   • 다른 언어 설정 시도")
-        print("   • 오디오 품질 개선 후 재시도")
-        
-        retry = input("\n다른 모델로 다시 시도하시겠습니까? (y/n): ").lower().strip()
-        if retry == 'y':
-            print("\n더 큰 모델로 재시도 중...")
-            result_large = transcribe_audio(audio_path, model_size="large", language=selected_language)
-            print("\n" + "="*50)
-            print("📝 개선된 변환 결과")
-            print("="*50)
-            print(result_large["text"])
-            analyze_transcription_quality(result_large)
-else:
-    print("오디오 추출에 실패했습니다.")
+                print(f"⚠️  잘못된 speech_id 형식입니다: {speech_id_value}")
+
+        video_path = resolve_video_source(job, settings, s3_client)
+        audio_path = extract_audio_from_video(video_path, Path(settings.audio_output_dir))
+        print(f"🎧 오디오 추출 완료: {audio_path}")
+
+        result = transcribe_audio(
+            audio_path,
+            model_size=job.get("model_size", "medium"),
+            language=job.get("language"),
+        )
+
+        print("\n" + "=" * 50)
+        print("📝 변환된 텍스트")
+        print("=" * 50)
+        print(result.get("text", ""))
+
+        quality_info = analyze_transcription_quality(result)
+        transcript_text = result.get("text", "")
+
+        document_text = ""
+        document_info: Optional[Dict[str, Any]] = None
+        if speech_record:
+            try:
+                document_path = resolve_document_source(speech_record, settings, s3_client)
+            except Exception as doc_exc:  # pylint: disable=broad-except
+                print(f"⚠️  문서 처리 중 오류가 발생했습니다: {doc_exc}")
+                document_info = {"error": str(doc_exc)}
+            else:
+                if document_path:
+                    doc_result = extract_document_text(document_path)
+                    document_text = doc_result.get("full_text", "") or ""
+                    document_info = {
+                        "method": doc_result.get("method"),
+                        "characters": len(document_text),
+                        "words": len(document_text.split()),
+                        "path": str(document_path),
+                        "full_text": document_text,
+                        "details": doc_result.get("details"),
+                    }
+
+        combined_text_parts = [text for text in [transcript_text, document_text] if text and text.strip()]
+        combined_source_text = "\n\n".join(combined_text_parts)
+
+        if speech_uuid:
+            db.update_speech_after_transcription(speech_uuid, transcript_text, document_text)
+
+        questions = maybe_generate_questions(combined_source_text, job, db)
+
+        metadata = {
+            **quality_info,
+            "language": result.get("language"),
+            "model_size": job.get("model_size", "medium"),
+            "speech_id": str(speech_uuid) if speech_uuid else None,
+            "document": document_info,
+        }
+        db.mark_completed(job["id"], combined_source_text or transcript_text, metadata, questions)
+        print(f"✅ 작업 완료: #{job['id']}")
+    except Exception as exc:
+        db.mark_failed(job["id"], str(exc))
+        print(f"❌ 작업 실패: #{job['id']} - {exc}")
+
+
+def create_s3_client(settings: Settings) -> Any:
+    return boto3.client(
+        "s3",
+        region_name=settings.aws_region,
+        aws_access_key_id=settings.aws_access_key,
+        aws_secret_access_key=settings.aws_secret_key,
+    )
+
+
+def main() -> None:
+    settings = Settings.from_env()
+    ensure_directory(Path(settings.audio_output_dir))
+    ensure_directory(Path(settings.downloads_dir))
+
+    db = Database(settings)
+    db.init_schema()
+
+    s3_client = create_s3_client(settings)
+
+    processed_jobs = 0
+    while processed_jobs < settings.job_batch_size:
+        job = db.fetch_next_job()
+        if not job:
+            if processed_jobs == 0:
+                print("⏱️  대기 중인 작업이 없습니다.")
+            break
+
+        process_job(job, settings, s3_client, db)
+        processed_jobs += 1
+
+    print(f"\n총 {processed_jobs}개의 작업을 처리했습니다.")
+
+
+if __name__ == "__main__":
+    main()
