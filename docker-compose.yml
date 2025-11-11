@@ -1,0 +1,31 @@
+version: "3.9"
+
+services:
+  app:
+    build: .
+    container_name: speakcheck_app
+    env_file: .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+      - ./downloads:/app/downloads
+      - ./audio:/app/audio
+    depends_on:
+      - postgres
+
+  postgres:
+    image: postgres:15
+    container_name: speakcheck_db
+    restart: always
+    environment:
+      POSTGRES_DB: speakcheck
+      POSTGRES_USER: speakcr
+      POSTGRES_PASSWORD: gxEl3fCNG1A4DHYnwapeCJCZRFwl4PBE
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
