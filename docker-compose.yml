@@ -1,14 +1,11 @@
 version: "3.9"
 
 services:
-  app:
+  speakcheck_app:
     build: .
     container_name: speakcheck_app
-    env_file: .env
     ports:
-      - "8000:8000"
-    volumes:
-      - .:/app
-      - ./downloads:/app/downloads
-      - ./audio:/app/audio
-    restart: unless-stopped
+      - "8081:8081"
+    env_file:
+      - .env
+    restart: always
