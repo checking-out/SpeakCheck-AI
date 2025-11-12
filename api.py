@@ -6,6 +6,7 @@ from uuid import UUID
 
 import jwt
 from fastapi import Depends, FastAPI, Header, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
 
 from ai_feedback import AIFeedback
@@ -117,6 +118,13 @@ feedback_service = AIFeedback()
 question_generator = QuestionGenerator()
 
 app = FastAPI(title="SpeakCheck Whisper API", version="1.0.0")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 def _serialize_job(raw: Dict[str, Any]) -> JobResponse:
