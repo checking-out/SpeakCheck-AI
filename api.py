@@ -221,7 +221,7 @@ def get_current_user_id(authorization: Optional[str] = Header(None)) -> UUID:
 
 def _derive_title(source: str, provided: Optional[str]) -> str:
     if provided:
-        return provided
+        return provided[:255]
 
     parsed = urlparse(source)
     candidate: Optional[str] = None
@@ -235,7 +235,7 @@ def _derive_title(source: str, provided: Optional[str]) -> str:
     if candidate:
         candidate = candidate.strip()
 
-    return candidate or "Untitled Speech"
+    return (candidate or "Untitled Speech")[:255]
 
 
 def _ensure_stage_ownership(stage_id: UUID, current_user_id: UUID) -> Dict[str, Any]:
@@ -311,6 +311,7 @@ def create_speech(
     _ensure_stage_ownership(request.stage_id, current_user_id)
 
     title = request.title.strip() if request.title else "Untitled Speech"
+    title = title[:255]
 
     speech = database.create_speech(
         stage_id=request.stage_id,
