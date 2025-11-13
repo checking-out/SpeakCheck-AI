@@ -1,3 +1,4 @@
+from base64 import b64decode
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -152,6 +153,16 @@ def _serialize_stage(stage: Dict[str, Any], speeches: List[Dict[str, Any]]) -> S
     )
 
 
+def _get_signing_secret() -> str | bytes:
+    raw_secret = settings.jwt_secret_key
+    try:
+        decoded = b64decode(raw_secret, validate=True)
+        # PyJWT can take bytes directly
+        return decoded
+    except Exception:  # noqa: BLE001 - falls back to raw secret
+        return raw_secret
+
+
 def get_current_user_id(authorization: Optional[str] = Header(None)) -> UUID:
     if not authorization:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing authorization header")
@@ -165,7 +176,7 @@ def get_current_user_id(authorization: Optional[str] = Header(None)) -> UUID:
     token = authorization.split(" ", maxsplit=1)[1].strip()
 
     try:
-        payload = jwt.decode(token, settings.jwt_secret_key, algorithms=["HS256"])
+        payload = jwt.decode(token, _get_signing_secret(), algorithms=["HS256"])
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired")
     except jwt.InvalidTokenError:
