@@ -119,6 +119,8 @@ feedback_service = AIFeedback()
 question_generator = QuestionGenerator()
 
 app = FastAPI(title="SpeakCheck Whisper API", version="1.0.0")
+
+# ✅ 미들웨어 먼저
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -126,6 +128,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ✅ 그 다음 OPTIONS 핸들러
+@app.options("/{rest_of_path:path}", include_in_schema=False)
+def handle_options(rest_of_path: str) -> Response:
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 def _serialize_job(raw: Dict[str, Any]) -> JobResponse:
