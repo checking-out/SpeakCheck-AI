@@ -9,6 +9,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
+import base64
 
 from ai_feedback import AIFeedback
 from config import Settings
@@ -164,13 +165,19 @@ def get_current_user_id(authorization: Optional[str] = Header(None)) -> UUID:
 
     token = authorization.split(" ", maxsplit=1)[1].strip()
 
+    # ✅ Base64 decode 시도 + fallback
     try:
-        # ✅ Spring과 동일하게 secret을 UTF-8 bytes로 인코딩해서 검증
-        payload = jwt.decode(token, settings.jwt_secret_key.encode("utf-8"), algorithms=["HS256"])
+        try:
+            secret = base64.b64decode(settings.jwt_secret_key)
+        except Exception:
+            # Base64 decode 실패 시 그냥 UTF-8 바이트 사용
+            secret = settings.jwt_secret_key.encode("utf-8")
+
+        payload = jwt.decode(token, secret, algorithms=["HS256"])
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired")
-    except jwt.InvalidTokenError as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from exc
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
     user_id = payload.get("id")
     if not user_id:
@@ -178,9 +185,8 @@ def get_current_user_id(authorization: Optional[str] = Header(None)) -> UUID:
 
     try:
         return UUID(user_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload") from exc
-
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload")
 
 def _derive_title(source: str, provided: Optional[str]) -> str:
     if provided:
