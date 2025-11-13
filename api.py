@@ -129,10 +129,6 @@ app.add_middleware(
 )
 
 
-# ✅ 그 다음 OPTIONS 핸들러
-@app.options("/{rest_of_path:path}", include_in_schema=False)
-def handle_options(rest_of_path: str) -> Response:
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 def _serialize_job(raw: Dict[str, Any]) -> JobResponse:
