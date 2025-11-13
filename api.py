@@ -120,14 +120,14 @@ question_generator = QuestionGenerator()
 
 app = FastAPI(title="SpeakCheck Whisper API", version="1.0.0")
 
-# ✅ 미들웨어 먼저
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:3001"],
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["*", "Authorization"],  # ✅ 명시적으로 추가
 )
+
 
 # ✅ 그 다음 OPTIONS 핸들러
 @app.options("/{rest_of_path:path}", include_in_schema=False)
