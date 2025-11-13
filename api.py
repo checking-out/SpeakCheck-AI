@@ -165,14 +165,9 @@ def get_current_user_id(authorization: Optional[str] = Header(None)) -> UUID:
 
     token = authorization.split(" ", maxsplit=1)[1].strip()
 
-    # ✅ Base64 decode 시도 + fallback
     try:
-        try:
-            secret = base64.b64decode(settings.jwt_secret_key)
-        except Exception:
-            # Base64 decode 실패 시 그냥 UTF-8 바이트 사용
-            secret = settings.jwt_secret_key.encode("utf-8")
-
+        # ✅ Base64 강제 decode (Spring과 동일하게 32바이트 키 사용)
+        secret = base64.b64decode(settings.jwt_secret_key)
         payload = jwt.decode(token, secret, algorithms=["HS256"])
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired")
@@ -187,6 +182,7 @@ def get_current_user_id(authorization: Optional[str] = Header(None)) -> UUID:
         return UUID(user_id)
     except ValueError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload")
+
 
 def _derive_title(source: str, provided: Optional[str]) -> str:
     if provided:
