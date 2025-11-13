@@ -163,9 +163,13 @@ def get_current_user_id(authorization: Optional[str] = Header(None)) -> UUID:
         )
 
     token = authorization.split(" ", maxsplit=1)[1].strip()
+
     try:
-        payload = jwt.decode(token, settings.jwt_secret_key, algorithms=["HS256"])
-    except jwt.InvalidTokenError as exc:  # type: ignore[attr-defined]
+        # ✅ Spring과 동일하게 secret을 UTF-8 bytes로 인코딩해서 검증
+        payload = jwt.decode(token, settings.jwt_secret_key.encode("utf-8"), algorithms=["HS256"])
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired")
+    except jwt.InvalidTokenError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from exc
 
     user_id = payload.get("id")
