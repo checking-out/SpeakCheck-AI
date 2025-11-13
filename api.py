@@ -7,6 +7,7 @@ from uuid import UUID
 import jwt
 from fastapi import Depends, FastAPI, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from ai_feedback import AIFeedback
@@ -246,6 +247,11 @@ def _sanitize_generated_questions(raw_questions: List[Dict[str, Any]]) -> List[D
 @app.get("/healthz", tags=["health"])
 def health_check() -> Dict[str, str]:
     return {"status": "ok"}
+
+
+@app.options("/{rest_of_path:path}", include_in_schema=False)
+def handle_options(rest_of_path: str) -> Response:
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @app.post(
