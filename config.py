@@ -21,7 +21,8 @@ class Settings:
         env = os.getenv
 
         postgres_url = env("POSTGRES_URL")
-        jwt_secret_key = env("JWT_SECRET_KEY", "Vh9!tG4qZ2n$eY7@cX5wJ8pR1sK0uL3*")
+        raw_secret = env("JWT_SECRET_KEY", "udBwgQGYUlt9Ky2eTcE5ddkDgMWNNsG29QuIt8gilHQ")
+        jwt_secret_key = raw_secret.replace(r"\$", "$")
         aws_access_key = env("AWS_ACCESS_KEY")
         aws_secret_key = env("AWS_SECRET_KEY")
 
