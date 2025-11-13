@@ -1,4 +1,4 @@
-from base64 import b64decode
+import base64
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -154,12 +154,13 @@ def _serialize_stage(stage: Dict[str, Any], speeches: List[Dict[str, Any]]) -> S
 
 
 def _get_signing_secret() -> str | bytes:
-    raw_secret = settings.jwt_secret_key
+    raw_secret = settings.jwt_secret_key.strip()
+    # base64 strings must be modulo 4; pad if needed to mimic Java decoder leniency
+    padding = len(raw_secret) % 4
+    candidate = raw_secret + ("=" * (4 - padding) if padding else "")
     try:
-        decoded = b64decode(raw_secret, validate=True)
-        # PyJWT can take bytes directly
-        return decoded
-    except Exception:  # noqa: BLE001 - falls back to raw secret
+        return base64.b64decode(candidate, validate=False)
+    except Exception:  # noqa: BLE001 - fallback to raw secret
         return raw_secret
 
 
