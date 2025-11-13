@@ -557,10 +557,11 @@ def update_speech_document(
     _ensure_stage_ownership(stage_id, current_user_id)
 
     speech_title = _derive_title(request.document_url, None)
+    document_url = request.document_url[:255]
     updated_speech = database.update_speech_document(
         speech_id=speech_id,
         title=speech_title,
-        document_url=request.document_url,
+        document_url=document_url,
     )
 
     return _serialize_speech(updated_speech)
