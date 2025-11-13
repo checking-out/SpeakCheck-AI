@@ -1,4 +1,7 @@
 import base64
+import subprocess
+import sys
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -118,6 +121,9 @@ database = Database(settings)
 database.init_schema()
 feedback_service = AIFeedback()
 question_generator = QuestionGenerator()
+_project_root = Path(__file__).resolve().parent
+_job_worker_lock = threading.Lock()
+_job_worker_running = False
 
 app = FastAPI(title="SpeakCheck Whisper API", version="1.0.0")
 
@@ -162,6 +168,26 @@ def _get_signing_secret() -> str | bytes:
         return base64.b64decode(candidate, validate=False)
     except Exception:  # noqa: BLE001 - fallback to raw secret
         return raw_secret
+
+
+def _run_job_worker() -> None:
+    global _job_worker_running  # noqa: PLW0603
+    try:
+        subprocess.run([sys.executable, str(_project_root / "main.py")], check=True)
+    except Exception as exc:  # noqa: BLE001
+        print(f"⚠️  Background job worker failed: {exc}")
+    finally:
+        with _job_worker_lock:
+            _job_worker_running = False
+
+
+def _trigger_job_worker() -> None:
+    global _job_worker_running  # noqa: PLW0603
+    with _job_worker_lock:
+        if _job_worker_running:
+            return
+        _job_worker_running = True
+    threading.Thread(target=_run_job_worker, daemon=True).start()
 
 
 def get_current_user_id(authorization: Optional[str] = Header(None)) -> UUID:
@@ -504,6 +530,7 @@ def update_speech_video(
         stage_id=stage_id,
         speech_id=speech_id,
     )
+    _trigger_job_worker()
 
     return SpeechVideoResponse(
         speech=_serialize_speech(updated_speech),
