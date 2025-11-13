@@ -9,7 +9,6 @@ from fastapi import Depends, FastAPI, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
-import base64
 
 from ai_feedback import AIFeedback
 from config import Settings
@@ -166,9 +165,7 @@ def get_current_user_id(authorization: Optional[str] = Header(None)) -> UUID:
     token = authorization.split(" ", maxsplit=1)[1].strip()
 
     try:
-        # ✅ Base64 강제 decode (Spring과 동일하게 32바이트 키 사용)
-        secret = base64.b64decode(settings.jwt_secret_key)
-        payload = jwt.decode(token, secret, algorithms=["HS256"])
+        payload = jwt.decode(token, settings.jwt_secret_key, algorithms=["HS256"])
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired")
     except jwt.InvalidTokenError:
