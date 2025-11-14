@@ -21,7 +21,7 @@ class AIFeedback:
         context: str,
     ) -> Dict[str, Optional[str]]:
         prompt = f"""
-당신은 스피치 코치입니다. 아래 정보를 참고하여 학습자 답변을 평가하고 피드백을 작성하세요.
+당신은 발표 코치입니다. 아래 정보를 참고해 학습자 답변을 평가하세요.
 
 [질문]
 {question}
@@ -35,15 +35,14 @@ class AIFeedback:
 [학습자 답변]
 {user_answer}
 
-아래 형식을 따라 간결하게 한국어로 답변하세요.
-
-점수(0~100): ...
-강점: ...
-보완할점: ...
-핵심키워드: ...
+한국어 문장 3개만 출력하세요. 형식은 다음과 같습니다.
+1문장: 0~100점 범위의 점수와 전체 인상 (예: "점수 82점입니다. 핵심을 대부분 짚었습니다.")
+2문장: 가장 큰 강점을 한 문장으로 요약.
+3문장: 가장 시급한 보완점을 한 문장으로 제시.
+불릿, 별표, 추가 설명, 공백 줄을 넣지 마세요.
 """
         try:
-            model = genai.GenerativeModel("gemini-1.0-pro")
+            model = genai.GenerativeModel("gemini-2.5-flash")
             response = model.generate_content(prompt)
             text = response.text.strip()
             score = self._extract_score(text)
@@ -86,7 +85,7 @@ class AIFeedback:
 }}
 """
         try:
-            model = genai.GenerativeModel("gemini-1.0-pro")
+            model = genai.GenerativeModel("gemini-2.5-flash")
             response = model.generate_content(prompt)
             text = response.text.strip()
             import json
@@ -150,10 +149,16 @@ class AIFeedback:
         if not user_answer.strip():
             areas.append("답변을 입력하면 피드백을 받을 수 있습니다.")
 
+        strengths_text = (
+            strengths[0] if strengths else "뚜렷한 강점을 파악하기 어려웠습니다."
+        )
+        areas_text = (
+            areas[0] if areas else "현재 방향을 유지하면서 세부 근거만 보강하면 좋겠습니다."
+        )
         feedback_lines = [
-            f"점수(예상): {score}",
-            f"강점: {', '.join(strengths) if strengths else '강점을 파악하기 어렵습니다.'}",
-            f"보완할점: {', '.join(areas) if areas else '현재 답변을 계속 유지해 보세요.'}",
+            f"점수 {score}점입니다. 질문 의도를 {'어느 정도 충족했습니다.' if score >= 50 else '충족하지 못했습니다.'}",
+            f"강점은 {strengths_text}",
+            f"보완할 부분은 {areas_text}",
         ]
         return {
             "feedback": "\n".join(feedback_lines),

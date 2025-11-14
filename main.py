@@ -25,6 +25,38 @@ def ensure_directory(path: Path) -> Path:
     return path
 
 
+def _cleanup_temp_artifacts(allowed_roots: List[Path], *paths: Optional[Path]) -> None:
+    for candidate in paths:
+        if not candidate:
+            continue
+        try:
+            resolved = candidate.resolve()
+        except FileNotFoundError:
+            continue
+
+        should_delete = False
+        for root in allowed_roots:
+            try:
+                if resolved.is_relative_to(root):
+                    should_delete = True
+                    break
+            except AttributeError:
+                # Python < 3.9 fallback
+                try:
+                    resolved.relative_to(root)
+                    should_delete = True
+                    break
+                except ValueError:
+                    continue
+
+        if should_delete:
+            try:
+                resolved.unlink(missing_ok=True)
+                print(f"🧹 임시 파일 삭제: {resolved}")
+            except Exception as exc:  # pylint: disable=broad-except
+                print(f"⚠️  임시 파일 삭제 실패 ({resolved}): {exc}")
+
+
 def download_video_from_web(url: str, download_dir: Path, job_id: int) -> Path:
     ensure_directory(download_dir)
     output_template = download_dir / f"{job_id}_%(title)s.%(ext)s"
@@ -330,6 +362,13 @@ def maybe_generate_questions(source_text: str, job: Dict[str, Any], db: Database
 
 def process_job(job: Dict[str, Any], settings: Settings, s3_client: Any, db: Database) -> None:
     print(f"\n🚀 작업 시작: #{job['id']} ({job['video_source']})")
+    video_path: Optional[Path] = None
+    audio_path: Optional[Path] = None
+    document_path: Optional[Path] = None
+    cleanup_roots = [
+        Path(settings.downloads_dir).resolve(),
+        Path(settings.audio_output_dir).resolve(),
+    ]
     try:
         speech_record: Optional[Dict[str, Any]] = None
         speech_uuid: Optional[UUID] = None
@@ -400,6 +439,8 @@ def process_job(job: Dict[str, Any], settings: Settings, s3_client: Any, db: Dat
     except Exception as exc:
         db.mark_failed(job["id"], str(exc))
         print(f"❌ 작업 실패: #{job['id']} - {exc}")
+    finally:
+        _cleanup_temp_artifacts(cleanup_roots, video_path, audio_path, document_path)
 
 
 def create_s3_client(settings: Settings) -> Any:
@@ -422,7 +463,7 @@ def main() -> None:
     s3_client = create_s3_client(settings)
 
     processed_jobs = 0
-    while processed_jobs < settings.job_batch_size:
+    while True:
         job = db.fetch_next_job()
         if not job:
             if processed_jobs == 0:
