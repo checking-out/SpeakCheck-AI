@@ -132,6 +132,8 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3001",
         "https://speackcheckvercel.vercel.app",
+        "https://123isi.com",
+        "https://www.123isi.com",
     ],
     allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
