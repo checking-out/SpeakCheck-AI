@@ -566,7 +566,3 @@ def update_speech_document(
     return _serialize_speech(updated_speech)
 
 
-if __name__ == "__main__":
-    import uvicorn
-
-    uvicorn.run("api:app", host="0.0.0.0", port=8081, reload=True)
