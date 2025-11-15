@@ -353,6 +353,10 @@ def maybe_generate_questions(source_text: str, job: Dict[str, Any], db: Database
             }
         )
 
+    question_count = len(sanitized_questions)
+    if question_count:
+        print(f"🧠 질문 생성 완료: {question_count}개")
+
     speech_id = job.get("speech_id")
     if speech_id:
         db.store_questions(speech_id, sanitized_questions)

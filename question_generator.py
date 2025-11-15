@@ -87,43 +87,75 @@ class QuestionGenerator:
 
     def _parse_questions(self, questions_text: str) -> List[Dict]:
         """생성된 질문 텍스트를 파싱하여 구조화된 데이터로 변환"""
-        questions = []
-        
-        # 정규표현식을 사용한 더 강력한 파싱
+        questions: List[Dict] = []
+        normalized = (questions_text or "").strip()
+        if not normalized:
+            return questions
+
         import re
-        
-        # 질문 블록을 분리 (숫자. 질문: 패턴으로 시작)
-        question_blocks = re.split(r'\n(?=\d+\.\s*질문:)', questions_text.strip())
-        
+
+        def _clean_text(value: str) -> str:
+            return re.sub(r"\s+", " ", value).strip()
+
+        flexible_pattern = re.compile(
+            r"""
+            (?:
+                ^|\n
+            )
+            \s*
+            (?:\d+\s*[\.\)\-]\s*)?      # optional leading numbering like 1. / 1) / 1-
+            질문(?:\s*\d+)?\s*[:：]\s*   # "질문" 혹은 "질문 1"
+            (?P<question>.+?)
+            (?:\r?\n)+\s*
+            (?:모범답안|정답|답변)\s*[:：]\s*
+            (?P<answer>.+?)
+            (?=
+                (?:\r?\n)+\s*(?:\d+\s*[\.\)\-]\s*질문|질문\s*\d+|$)
+                |
+                \Z
+            )
+            """,
+            re.IGNORECASE | re.DOTALL | re.VERBOSE,
+        )
+
+        matches = list(flexible_pattern.finditer(normalized))
+        if matches:
+            for match in matches:
+                question_text = _clean_text(match.group("question"))
+                answer_text = _clean_text(match.group("answer"))
+                if not question_text:
+                    continue
+                questions.append(
+                    {
+                        "question": question_text,
+                        "model_answer": answer_text,
+                    }
+                )
+            if questions:
+                return questions
+
+        # 🔙 fallback: 기존 라인 기반 파싱 (예상치 못한 출력 포맷 대응)
+        question_blocks = re.split(r"\n(?=\d+\.\s*질문:)", normalized)
+        numbering_prefixes = tuple(f"{idx}." for idx in range(1, 10))
         for block in question_blocks:
             if not block.strip():
                 continue
-                
-            question = {}
-            lines = block.strip().split('\n')
-            
+
+            question: Dict[str, str] = {}
+            lines = block.strip().split("\n")
             for line in lines:
-                line = line.strip()
-                if not line:
+                cleaned = line.strip()
+                if not cleaned:
                     continue
-                    
-                if line.startswith(('1.', '2.', '3.', '4.', '5.', '6.', '7.', '8.', '9.')) and '질문:' in line:
-                    # 질문 텍스트 추출
-                    question["question"] = line.split('질문:', 1)[1].strip()
-                elif line.startswith('모범답안:'):
-                    question["model_answer"] = line.split('모범답안:', 1)[1].strip()
-            
-            # 기본값 설정
-            if "question" not in question:
-                question["question"] = ""
-            if "model_answer" not in question:
-                question["model_answer"] = ""
-            if "model_answer" not in question:
-                question["model_answer"] = ""
-            
-            if question["question"]:
+                if cleaned.startswith(numbering_prefixes) and "질문:" in cleaned:
+                    question["question"] = cleaned.split("질문:", 1)[1].strip()
+                elif cleaned.startswith("모범답안:"):
+                    question["model_answer"] = cleaned.split("모범답안:", 1)[1].strip()
+
+            if question.get("question"):
+                question.setdefault("model_answer", "")
                 questions.append(question)
-        
+
         return questions
     
     def _generate_fallback_questions(self, text: str, num_questions: int) -> List[Dict]:
