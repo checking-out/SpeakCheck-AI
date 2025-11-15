@@ -164,8 +164,11 @@ def _serialize_stage(stage: Dict[str, Any], speeches: List[Dict[str, Any]]) -> S
     )
 
 
-def _get_signing_secret() -> str:
-    return settings.jwt_secret_key
+def get_current_user_id(authorization: Optional[str] = Header(None)) -> UUID:
+    print("🔍 Authorization Header:", authorization)
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Missing authorization header")
+
 
 
 
