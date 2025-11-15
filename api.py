@@ -164,15 +164,9 @@ def _serialize_stage(stage: Dict[str, Any], speeches: List[Dict[str, Any]]) -> S
     )
 
 
-def _get_signing_secret() -> str | bytes:
-    raw_secret = settings.jwt_secret_key.strip()
-    # base64 strings must be modulo 4; pad if needed to mimic Java decoder leniency
-    padding = len(raw_secret) % 4
-    candidate = raw_secret + ("=" * (4 - padding) if padding else "")
-    try:
-        return base64.b64decode(candidate, validate=False)
-    except Exception:  # noqa: BLE001 - fallback to raw secret
-        return raw_secret
+def _get_signing_secret() -> str:
+    return settings.jwt_secret_key
+
 
 
 def _run_job_worker() -> None:
