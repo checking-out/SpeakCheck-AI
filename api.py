@@ -162,7 +162,9 @@ def _serialize_stage(stage: Dict[str, Any], speeches: List[Dict[str, Any]]) -> S
             "speeches": [SpeechRecord.model_validate(speech) for speech in speeches],
         }
     )
-
+def _get_signing_secret() -> str:
+    # 🔥 Spring과 동일한 RAW SECRET 사용
+    return settings.jwt_secret_key.strip()
 
 def get_current_user_id(authorization: Optional[str] = Header(None)) -> UUID:
     print("🔍 Authorization Header:", authorization)
