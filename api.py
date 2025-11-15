@@ -135,10 +135,9 @@ app.add_middleware(
         "https://123isi.com",
         "https://www.123isi.com",
     ],
-    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*", "Authorization"],  # ✅ 명시적으로 추가
+    allow_headers=["*"],
 )
 
 
