@@ -1,4 +1,5 @@
 import subprocess
+import traceback
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from uuid import UUID
@@ -437,8 +438,10 @@ def process_job(job: Dict[str, Any], settings: Settings, s3_client: Any, db: Dat
         db.mark_completed(job["id"], combined_source_text or transcript_text, metadata, questions)
         print(f"✅ 작업 완료: #{job['id']}")
     except Exception as exc:
-        db.mark_failed(job["id"], str(exc))
-        print(f"❌ 작업 실패: #{job['id']} - {exc}")
+        error_message = f"{exc.__class__.__name__}: {exc}"
+        db.mark_failed(job["id"], error_message)
+        print(f"❌ 작업 실패: #{job['id']} - {error_message}")
+        traceback.print_exc()
     finally:
         _cleanup_temp_artifacts(cleanup_roots, video_path, audio_path, document_path)
 
