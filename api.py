@@ -299,11 +299,6 @@ def health_check() -> Dict[str, str]:
     return {"status": "ok"}
 
 
-@app.options("/{rest_of_path:path}", include_in_schema=False)
-def handle_options(rest_of_path: str) -> Response:
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
-
-
 @app.post(
     "/speech",
     response_model=SpeechRecord,
